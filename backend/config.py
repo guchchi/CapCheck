@@ -47,6 +47,20 @@ class Settings:
 
     @classmethod
     def load(cls) -> "Settings":
+        env_file = PROJECT_ROOT / ".env"
+        if env_file.is_file():
+            try:
+                for line in env_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k not in os.environ:
+                            os.environ[k] = v
+            except Exception:
+                pass
+
         data_dir = Path(os.environ.get("CAPCHECK_DATA_DIR", "data"))
         if not data_dir.is_absolute():
             data_dir = PROJECT_ROOT / data_dir
@@ -58,9 +72,9 @@ class Settings:
                 "CAPCHECK_GITHUB_API_BASE", "https://api.github.com"
             ),
             gemini_api_key=os.environ.get("GEMINI_API_KEY"),
-            gemma_model=os.environ.get("CAPCHECK_GEMMA_MODEL", "gemma-4-31b-it"),
-            llm_timeout_seconds=float(os.environ.get("CAPCHECK_LLM_TIMEOUT", "10.0")),
-            llm_max_retries=int(os.environ.get("CAPCHECK_LLM_RETRIES", "2")),
+            gemma_model=os.environ.get("CAPCHECK_GEMMA_MODEL", "gemma-4-26b-a4b-it"),
+            llm_timeout_seconds=float(os.environ.get("CAPCHECK_LLM_TIMEOUT", "30.0")),
+            llm_max_retries=int(os.environ.get("CAPCHECK_LLM_RETRIES", "1")),
         )
 
     @property

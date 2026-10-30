@@ -379,3 +379,156 @@ def test_claims_api_nonexistent_scan_returns_404(client):
     res = client.get("/api/scans/invalid_scan_id_99999/claims")
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "SCAN_NOT_FOUND"
+
+
+# --------------------------------------------------------------------------
+# 5. Live response parser reliability regression tests
+# --------------------------------------------------------------------------
+
+
+def test_parser_handles_valid_structured_json():
+    provider = GemmaProvider(api_key="mock_key", model="gemma-4-26b-a4b-it")
+    tool = _sample_tool()
+    payload = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "claimed_behavior": "Add two numbers",
+                                            "observed_behavior": "Adds numbers and checks environment",
+                                            "potential_mismatch": True,
+                                            "confidence": 0.85,
+                                            "supporting_code_references": ["server.py:25"],
+                                            "reasoning": "Observed environment read not in declared description.",
+                                        }
+                                    ]
+                                }
+                            )
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    claims = provider._parse_claims(payload, tool)
+    assert len(claims) == 1
+    assert claims[0]["claimed_behavior"] == "Add two numbers"
+    assert claims[0]["observed_behavior"] == "Adds numbers and checks environment"
+    assert claims[0]["potential_mismatch"] is True
+    assert claims[0]["confidence"] == 0.85
+    assert claims[0]["supporting_code_references"] == ["server.py:25"]
+    assert claims[0]["model"] == "gemma-4-26b-a4b-it"
+
+
+def test_parser_rejects_malformed_json():
+    provider = GemmaProvider(api_key="mock_key", model="gemma-4-26b-a4b-it")
+    tool = _sample_tool()
+    payload = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": "{ 'claims': [ invalid json without closing }] }"}]
+                }
+            }
+        ]
+    }
+    claims = provider._parse_claims(payload, tool)
+    assert claims == []
+
+
+def test_parser_rejects_prose_and_unstructured_reasoning():
+    provider = GemmaProvider(api_key="mock_key", model="gemma-4-26b-a4b-it")
+    tool = _sample_tool()
+    prose = (
+        "Here is my analysis of the tool:\n"
+        "* Tool Name: add\n"
+        "* The tool claims to add numbers, but I observed environment access.\n"
+        "* Potential mismatch: true\n"
+        "* Confidence: 0.95\n"
+        "In conclusion, this tool might be suspicious."
+    )
+    payload = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": prose}]
+                }
+            }
+        ]
+    }
+    # Prose with bullet points without valid structured JSON must be rejected
+    claims = provider._parse_claims(payload, tool)
+    assert claims == []
+
+
+def test_parser_rejects_incomplete_claims_and_validates_types():
+    provider = GemmaProvider(api_key="mock_key", model="gemma-4-26b-a4b-it")
+    tool = _sample_tool()
+
+    incomplete_cases = [
+        # Missing observed_behavior
+        {"claimed_behavior": "Add", "potential_mismatch": True, "confidence": 0.8},
+        # Missing claimed_behavior
+        {"observed_behavior": "Executes shell", "potential_mismatch": True, "confidence": 0.8},
+        # potential_mismatch is string not boolean
+        {"claimed_behavior": "Add", "observed_behavior": "Exec", "potential_mismatch": "true", "confidence": 0.8},
+        # Confidence out of bounds (> 1.0)
+        {"claimed_behavior": "Add", "observed_behavior": "Exec", "potential_mismatch": True, "confidence": 1.5},
+        # Confidence negative (< 0.0)
+        {"claimed_behavior": "Add", "observed_behavior": "Exec", "potential_mismatch": True, "confidence": -0.1},
+        # Confidence non-numeric
+        {"claimed_behavior": "Add", "observed_behavior": "Exec", "potential_mismatch": True, "confidence": "high"},
+    ]
+
+    for case in incomplete_cases:
+        payload = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": json.dumps({"claims": [case]})}]
+                    }
+                }
+            ]
+        }
+        claims = provider._parse_claims(payload, tool)
+        assert claims == [], f"Expected rejection for incomplete case: {case}"
+
+
+def test_parser_does_not_invent_missing_references():
+    provider = GemmaProvider(api_key="mock_key", model="gemma-4-26b-a4b-it")
+    tool = _sample_tool()
+    payload = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": json.dumps(
+                                {
+                                    "claims": [
+                                        {
+                                            "claimed_behavior": "Add numbers",
+                                            "observed_behavior": "Adds numbers",
+                                            "potential_mismatch": False,
+                                            "confidence": 0.9,
+                                            # No supporting_code_references provided
+                                        }
+                                    ]
+                                }
+                            )
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    claims = provider._parse_claims(payload, tool)
+    assert len(claims) == 1
+    # Must never invent fake or assumed file references
+    assert claims[0]["supporting_code_references"] == []
+

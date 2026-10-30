@@ -234,50 +234,99 @@ class GemmaProvider:
             if not raw_text:
                 return []
 
-            # Strip markdown code blocks if present
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-                raw_text = re.sub(r"\s*```$", "", raw_text)
+            # Extract structured JSON object from the response text
+            parsed_json = None
 
-            parsed_json = json.loads(raw_text)
+            # 1. Direct JSON parse
+            try:
+                candidate = json.loads(raw_text)
+                if isinstance(candidate, dict) and "claims" in candidate:
+                    parsed_json = candidate
+            except Exception:
+                pass
+
+            # 2. Stripped markdown code block (```json ... ``` or ``` ... ```)
+            if parsed_json is None:
+                matches = re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", raw_text)
+                for block in reversed(matches):
+                    try:
+                        candidate = json.loads(block)
+                        if isinstance(candidate, dict) and "claims" in candidate:
+                            parsed_json = candidate
+                            break
+                    except Exception:
+                        continue
+
+            # 3. Outermost JSON object containing a "claims" list
+            if parsed_json is None:
+                matches = re.findall(r"(\{[^{}]*\"claims\"\s*:\s*\[[\s\S]*?\][^{}]*\})", raw_text)
+                for candidate_str in reversed(matches):
+                    try:
+                        candidate = json.loads(candidate_str)
+                        if isinstance(candidate, dict) and "claims" in candidate:
+                            parsed_json = candidate
+                            break
+                    except Exception:
+                        continue
+
+            # If not valid structured JSON with a "claims" key, safely return empty
+            if not isinstance(parsed_json, dict):
+                return []
+
             raw_claims = parsed_json.get("claims", [])
             if not isinstance(raw_claims, list):
                 return []
 
             claims: list[dict[str, Any]] = []
+            max_text_len = 1000
+
             for index, item in enumerate(raw_claims, start=1):
                 if not isinstance(item, dict):
                     continue
 
-                claimed = str(item.get("claimed_behavior", "")).strip()
-                observed = str(item.get("observed_behavior", "")).strip()
-                mismatch = bool(item.get("potential_mismatch", False))
+                claimed = str(item.get("claimed_behavior", "")).strip()[:max_text_len]
+                observed = str(item.get("observed_behavior", "")).strip()[:max_text_len]
 
+                # Both claimed and observed behavior are required fields
+                if not claimed or not observed:
+                    continue
+
+                mismatch_val = item.get("potential_mismatch")
+                if not isinstance(mismatch_val, bool):
+                    # Strict validation: potential_mismatch must be boolean
+                    continue
+
+                raw_conf = item.get("confidence")
+                if not isinstance(raw_conf, (int, float)):
+                    continue
                 try:
-                    conf = float(item.get("confidence", 0.8))
-                    conf = max(0.0, min(1.0, conf))
+                    conf = float(raw_conf)
                 except (ValueError, TypeError):
-                    conf = 0.8
+                    continue
 
-                refs = item.get("supporting_code_references", [])
-                if not isinstance(refs, list):
-                    refs = [f"{tool.source_file}:{tool.handler_line or tool.line}"]
+                # Confidence must be within 0.0 to 1.0
+                if conf < 0.0 or conf > 1.0:
+                    continue
+
+                # Supporting code references: only keep valid non-empty string references
+                # Never invent missing code references
+                raw_refs = item.get("supporting_code_references")
+                if isinstance(raw_refs, list):
+                    refs = [str(r).strip()[:200] for r in raw_refs if str(r).strip()]
                 else:
-                    refs = [str(r) for r in refs if str(r).strip()]
-                if not refs:
-                    refs = [f"{tool.source_file}:{tool.handler_line or tool.line}"]
+                    refs = []
 
-                reasoning = str(item.get("reasoning", "")).strip()
+                reasoning = str(item.get("reasoning", "")).strip()[:max_text_len]
 
                 claim_id = f"claim_{tool.name}_{index:02d}"
                 claims.append(
                     {
                         "id": claim_id,
                         "tool_name": tool.name,
-                        "claimed_behavior": claimed or tool.declared_description,
+                        "claimed_behavior": claimed,
                         "observed_behavior": observed,
-                        "potential_mismatch": mismatch,
-                        "confidence": conf,
+                        "potential_mismatch": mismatch_val,
+                        "confidence": round(conf, 4),
                         "supporting_code_references": refs,
                         "cited_evidence_ids": [tool.evidence_id] if tool.evidence_id else [],
                         "model": self.model,
