@@ -59,3 +59,28 @@ def test_backend_does_not_depend_on_requests():
             if isinstance(node, ast.ImportFrom) and node.module == "requests":
                 offenders.append(str(path))
     assert offenders == []
+
+
+def test_evidence_rejects_paths_that_could_leak_the_filesystem():
+    import pytest
+
+    from backend.models import Evidence
+
+    def build(path: str) -> Evidence:
+        return Evidence(
+            id="ev_test:1",
+            kind="file_snippet",
+            path=path,
+            line_start=1,
+            line_end=1,
+            snippet="x",
+            extractor="test",
+            file_sha256="0" * 64,
+        )
+
+    assert build("server.js").path == "server.js"
+    assert build("src/tools/server.ts").path == "src/tools/server.ts"
+
+    for bad in ["/etc/passwd", "C:\\Users\\ap877\\server.py", "../../server.js", "src/../../x.js", ""]:
+        with pytest.raises(ValueError):
+            build(bad)

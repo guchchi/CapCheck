@@ -25,7 +25,7 @@ def _decorator_name(decorator: ast.AST) -> str | None:
 def _docstring_summary(node: ast.AST) -> str:
     doc = ast.get_docstring(node) or ""
     first_paragraph = doc.strip().split("\n\n")[0].strip()
-    return " ".join(first_paragraph.split())
+    return " ".join(first_paragraph.split())[:500]
 
 
 def _param_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
@@ -55,6 +55,9 @@ def discover_tools(ctx: AnalysisContext, tree: ast.Module) -> list[ToolDef]:
                         source_file=ctx.path,
                         line=node.lineno,
                         evidence_id=evidence_id,
+                        language="python",
+                        handler_line=node.lineno,
+                        handler_end_line=node.end_lineno,
                     )
                 )
         elif isinstance(node, ast.Call):
@@ -80,6 +83,7 @@ def discover_tools(ctx: AnalysisContext, tree: ast.Module) -> list[ToolDef]:
                     source_file=ctx.path,
                     line=node.lineno,
                     evidence_id=evidence_id,
+                    language="python",
                 )
             )
 

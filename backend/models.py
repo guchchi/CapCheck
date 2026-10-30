@@ -1,17 +1,37 @@
 """Typed data models shared across the CapCheck pipeline.
 
-Design rule for this module: a Finding may never exist without at least one
-Evidence reference. That invariant is validated in ``Scan.to_dict`` and is
-enforced by the correlation stage.
+Design rule: a Finding may never exist without at least one Evidence
+reference. Enforced in backend/core/correlate.py.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+_ABSOLUTE_PATH_RE = re.compile(r"^(?:[A-Za-z]:|[\\/])")
+
+
+def _validate_evidence_path(path: str) -> None:
+    """Reject any evidence path that could leak a local filesystem location.
+
+    Evidence paths must be relative, POSIX-style and free of ``..`` segments.
+    This is the last line of defence: even a future analyser bug cannot make
+    the API expose ``C:\\Users\\...`` or ``/etc/passwd`` as a path.
+    """
+    if not path:
+        raise ValueError("evidence path must not be empty")
+    if _ABSOLUTE_PATH_RE.match(path):
+        raise ValueError(f"evidence path must be relative: {path!r}")
+    if "\\" in path:
+        raise ValueError(f"evidence path must use '/' separators: {path!r}")
+    if any(part == ".." for part in path.split("/")):
+        raise ValueError(f"evidence path must not contain '..': {path!r}")
+
 Severity = Literal["info", "low", "medium", "high", "critical"]
 ScanStatus = Literal["queued", "running", "complete", "failed"]
+SourceKind = Literal["fixture", "github"]
 Corroboration = Literal["deterministic", "ai+static"]
 
 SEVERITY_ORDER: dict[str, int] = {
@@ -22,7 +42,6 @@ SEVERITY_ORDER: dict[str, int] = {
     "critical": 4,
 }
 
-# Deterministic weights. Documented in docs/PLAN.md; never model-derived.
 SEVERITY_WEIGHT: dict[str, int] = {
     "critical": 55,
     "high": 25,
@@ -45,6 +64,9 @@ class Evidence:
     extractor: str
     file_sha256: str
 
+    def __post_init__(self) -> None:
+        _validate_evidence_path(self.path)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -59,6 +81,11 @@ class ToolDef:
     source_file: str
     line: int
     evidence_id: str
+    language: str = "python"
+    input_schema: str | None = None
+    handler_line: int | None = None
+    handler_end_line: int | None = None
+    observed_capabilities: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -133,18 +160,22 @@ class RiskAssessment:
 class Scan:
     id: str
     source: str
-    source_kind: Literal["fixture"]
+    source_kind: SourceKind
     status: ScanStatus
     stage: str
     created_at: str
     finished_at: str | None = None
     files_scanned: int = 0
+    commit_sha: str | None = None
+    languages: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
     tools: list[ToolDef] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     evidence: list[Evidence] = field(default_factory=list)
     suppressed_claims: list[dict[str, Any]] = field(default_factory=list)
     risk: RiskAssessment | None = None
     error: str | None = None
+    error_code: str | None = None
 
     def evidence_by_id(self, evidence_id: str) -> Evidence | None:
         for item in self.evidence:
@@ -162,12 +193,16 @@ class Scan:
             "created_at": self.created_at,
             "finished_at": self.finished_at,
             "files_scanned": self.files_scanned,
+            "commit_sha": self.commit_sha,
+            "languages": self.languages,
+            "metadata": self.metadata,
             "tools": [tool.to_dict() for tool in self.tools],
             "findings": [finding.to_dict() for finding in self.findings],
             "evidence": [item.to_dict() for item in self.evidence],
             "suppressed_claims": self.suppressed_claims,
             "risk": self.risk.to_dict() if self.risk else None,
             "error": self.error,
+            "error_code": self.error_code,
         }
 
     @classmethod
@@ -191,10 +226,14 @@ class Scan:
             created_at=payload["created_at"],
             finished_at=payload.get("finished_at"),
             files_scanned=payload.get("files_scanned", 0),
+            commit_sha=payload.get("commit_sha"),
+            languages=payload.get("languages", []),
+            metadata=payload.get("metadata", {}),
             tools=[ToolDef(**item) for item in payload.get("tools", [])],
             findings=[Finding(**item) for item in payload.get("findings", [])],
             evidence=[Evidence(**item) for item in payload.get("evidence", [])],
             suppressed_claims=payload.get("suppressed_claims", []),
             risk=risk,
             error=payload.get("error"),
+            error_code=payload.get("error_code"),
         )

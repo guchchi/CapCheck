@@ -134,10 +134,10 @@ def test_path_traversal_fixture_name_is_rejected(client):
     assert response.json()["error"]["code"] == "UNKNOWN_FIXTURE"
 
 
-def test_remote_repo_scan_is_explicitly_not_implemented(client):
-    response = client.post("/api/scans", json={"repo_url": "https://github.com/a/b"})
+def test_malformed_remote_repo_url_is_rejected(client):
+    response = client.post("/api/scans", json={"repo_url": "https://gitlab.com/a/b"})
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "REPO_SCAN_NOT_IMPLEMENTED"
+    assert response.json()["error"]["code"] == "INVALID_REPO_URL"
 
 
 def test_missing_source_returns_400(client):

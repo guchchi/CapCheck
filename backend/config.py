@@ -1,8 +1,4 @@
-"""Runtime configuration for CapCheck.
-
-Milestone 1 is deliberately small: no database, no external services.
-Everything is read from environment variables with safe local defaults.
-"""
+"""Runtime configuration for CapCheck."""
 
 from __future__ import annotations
 
@@ -27,8 +23,21 @@ class Settings:
     dev_mode: bool
     data_dir: Path
     llm_provider: str
+
+    # Enumeration caps (apply to fixtures and remote repositories alike).
     max_files: int = 3000
     max_file_bytes: int = 1_000_000
+    max_total_bytes: int = 25 * 1024 * 1024
+
+    # Archive caps (remote ingestion only).
+    max_archive_bytes: int = 50 * 1024 * 1024
+    max_archive_entries: int = 20_000
+    max_compression_ratio: int = 200
+
+    # Network.
+    fetch_timeout_seconds: int = 30
+    github_api_base: str = "https://api.github.com"
+
     scan_timeout_seconds: int = 90
 
     @classmethod
@@ -40,6 +49,9 @@ class Settings:
             dev_mode=_as_bool(os.environ.get("CAPCHECK_DEV_MODE"), True),
             data_dir=data_dir,
             llm_provider=os.environ.get("CAPCHECK_LLM_PROVIDER", "null"),
+            github_api_base=os.environ.get(
+                "CAPCHECK_GITHUB_API_BASE", "https://api.github.com"
+            ),
         )
 
     @property
@@ -51,7 +63,9 @@ class Settings:
         if not FIXTURES_ROOT.is_dir():
             return []
         return sorted(
-            p.name for p in FIXTURES_ROOT.iterdir() if p.is_dir() and not p.name.startswith(".")
+            p.name
+            for p in FIXTURES_ROOT.iterdir()
+            if p.is_dir() and not p.name.startswith(".")
         )
 
 

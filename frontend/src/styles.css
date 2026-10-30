@@ -193,3 +193,137 @@ code {
   font-size: 13px;
   margin: 10px 0 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Milestone 2: source tabs, stage progress, tool table                */
+/* ------------------------------------------------------------------ */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.tab {
+  background: #1c2230;
+  border: 1px solid #2a3344;
+  color: #9aa4b8;
+  font-weight: 500;
+}
+
+.tab.active {
+  background: #24304a;
+  border-color: #3b6cf6;
+  color: #e7e9ee;
+}
+
+.url-input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #2f3746;
+  background: #11151d;
+  color: inherit;
+}
+
+.source-line {
+  margin: 0 0 10px;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.stepper {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #2a3344;
+  color: #6f7a8d;
+}
+
+.step .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3a4354;
+}
+
+.step.active {
+  border-color: #3b6cf6;
+  color: #e7e9ee;
+}
+
+.step.active .dot {
+  background: #3b6cf6;
+}
+
+.step.done {
+  color: #8b95a8;
+  border-color: #2f4a3a;
+}
+
+.step.done .dot {
+  background: #37b24d;
+}
+
+.step.failed {
+  border-color: #7a2b2b;
+  color: #ff8787;
+}
+
+.step.failed .dot {
+  background: #ff6b6b;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table.tools {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+table.tools th,
+table.tools td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 10px;
+  border-bottom: 1px solid #242a36;
+}
+
+table.tools th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8b95a8;
+  white-space: nowrap;
+}
+
+.cap {
+  display: inline-block;
+  margin: 1px 4px 1px 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #24304a;
+  border: 1px solid #2f3f60;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}

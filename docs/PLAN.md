@@ -1,6 +1,7 @@
 # CapCheck — Approved Architecture & Roadmap
 
-> Status: Milestone 1 implemented. Gemma 4 not yet integrated.
+> Status: Milestone 2 implemented. Python + JavaScript + TypeScript analysis,
+> public GitHub ingestion. Gemma 4 not yet integrated.
 > This document is the reference for all later milestones.
 
 ## 1. Product
@@ -38,13 +39,19 @@ source ──► ingest ──► discover ──► static (AST) ──┐
 
 | Stage | Module | Responsibility |
 |---|---|---|
-| Ingest | `core/ingest.py` | Resolve source, enumerate files, apply caps. No execution. |
-| Discover | `core/discover.py` | Find MCP tool declarations (decorators, `Tool(...)`). |
-| Static | `core/static_analysis.py` | AST walk → capabilities + evidence. |
-| Data-flow | `core/dataflow.py` | Intra-procedural taint: env/file → network/subprocess. |
+| Ingest | `core/ingest.py`, `core/github.py` | Resolve a fixture or fetch a public GitHub archive, unpack it safely, enumerate files, apply caps. No execution. |
+| Discover | `core/discover.py`, `core/js_discover.py` | Find MCP tool declarations (Python decorators/`Tool(...)`; JS/TS `new McpServer`, `.tool`, `.registerTool`). |
+| Static (Python) | `core/static_analysis.py` | Python AST walk → capabilities + evidence. |
+| Static (JS/TS) | `core/js_analysis.py`, `core/js_parser.py` | tree-sitter walk → capabilities + evidence. |
+| Data-flow (Python) | `core/dataflow.py` | Intra-procedural taint: env/file → network/subprocess. |
+| Data-flow (JS/TS) | `core/js_analysis.py` | Intra-procedural taint across local bindings, object/array literals, templates and call arguments. |
 | Semantic | `core/semantic.py` *(M3)* | Gemma 4 claim generation. Never a finding. |
-| Correlate | `core/correlate.py` | Enforce evidence invariant, score risk. |
-| Report | API serialisers | Expose findings, evidence, tools. |
+| Correlate | `core/correlate.py` | Enforce evidence invariant, attribute tool capabilities, score risk. |
+| Report | API serialisers | Expose findings, evidence, tools, commit SHA, languages, metadata. |
+
+Both analysers emit the same normalised dict shapes, so correlation has no
+language-specific branch. The rule catalogues stay separate
+(`rules/python_rules.py`, `rules/javascript_rules.py`).
 
 **Deliberate scope limit:** tool discovery is static. We do **not** use the
 official MCP client to enumerate tools, because connecting to a server means
@@ -86,28 +93,59 @@ of truth for severity.
 | `DF_FILE_TO_NETWORK` | **critical** | READ_FILE + NETWORK_EGRESS |
 | `DF_ENV_TO_SUBPROCESS` | high | READ_ENV + SUBPROCESS |
 
-A capability alone is never malicious. Only connected flows escalate.
+### JavaScript / TypeScript rules
+
+| Rule | Severity | Capabilities |
+|---|---|---|
+| `JS_ENV_ACCESS` | low | READ_ENV |
+| `JS_FILE_READ` | low | READ_FILE |
+| `JS_SENSITIVE_PATH_READ` | medium | READ_FILE |
+| `JS_NETWORK_EGRESS` | low | NETWORK_EGRESS |
+| `JS_SUBPROCESS` | medium | SUBPROCESS |
+| `JS_DYNAMIC_EXEC` | high | DYNAMIC_EXEC |
+| `JS_ENV_TO_NETWORK` | **critical** | READ_ENV + NETWORK_EGRESS |
+| `JS_FILE_TO_NETWORK` | **critical** | READ_FILE + NETWORK_EGRESS |
+| `JS_ENV_TO_SUBPROCESS` | high | READ_ENV + SUBPROCESS |
+
+A capability alone is never malicious. Only connected flows escalate. When two
+sources reach one sink, two findings are emitted so each cites its own source
+line.
 
 ## 7. Security posture
 
-- **Never execute repository code.** `ast.parse` only. No `exec`, `eval`,
-  `import`, `runpy`, `importlib`, or `subprocess` of scanned code.
+- **Never execute repository code.** Parsing only. No `exec`, `eval`,
+  `import`, `runpy`, `importlib`, `subprocess`, package manager or build
+  command touches scanned source. The JS analyser searches for `eval` and
+  `Function` nodes; it never calls them.
 - **No `shell=True` anywhere.**
 - Path handling resolves against the source root and rejects escapes.
-- When remote cloning arrives (M2): allowlist `https://github.com/`, shallow
-  clone, `--no-recurse-submodules`, hooks disabled, size/file caps, timeouts.
+  Evidence paths are validated on construction: relative, `/` separators, no
+  `..`, no drive letters.
+- **Remote ingestion does not use git.** GitHub REST resolves the commit, then
+  the codeload ZIP is downloaded and extracted manually. No hooks, no `.git`,
+  no submodules, no git binary.
+- **Archive hardening:** absolute paths, drive letters, backslashes, `..`,
+  symlinks, encrypted entries, entry count, per-file size, total expanded
+  size and compression ratio are checked. Declared sizes are not trusted;
+  actual bytes are counted while streaming, and every target must resolve
+  inside the scan directory.
+- **Temp isolation:** remote sources are unpacked into an isolated temp
+  directory and deleted in a `finally` block. Absolute paths never reach an
+  API response or scan artifact.
+- **Untrusted text is display data:** tool descriptions, schemas and snippets
+  are truncated; environment variable values are never read by the scanner.
 - Prompt injection is treated as a design problem, not a prompt problem: the
   model cannot create findings.
 - Dev mode binds `127.0.0.1`; fixture scanning can be disabled with
-  `CAPCHECK_DEV_MODE=0`.
+  `CAPCHECK_DEV_MODE=0`. There is no authentication; do not expose publicly.
 
 ## 8. Roadmap
 
 | Milestone | Content | State |
 |---|---|---|
 | **M1** | Fixture ingest, AST rules, data-flow, deterministic risk, NullProvider, minimal UI, 29 tests | ✅ done |
-| **M2** | Remote GitHub ingestion (allowlist, caps, timeouts), JS/TS discovery, tool-vs-behaviour mismatch | next |
-| **M3** | Gemma 4 semantic claims with validated citations + corroboration; `suppressed_claims` surfaced in UI | planned |
+| **M2** | Public GitHub ingestion, archive hardening, JS/TS discovery, JS/TS source-to-sink analysis, four new fixtures, UI for repo URL + tools + stages | ✅ done |
+| **M3** | Gemma 4 semantic claims with validated citations + corroboration; `suppressed_claims` surfaced in UI | next |
 | **M4** | DigitalOcean deployment, report export, history | planned |
 | **M5 (stretch)** | Ephemeral droplet detonation with egress logging | stretch |
 
@@ -127,8 +165,22 @@ A capability alone is never malicious. Only connected flows escalate.
 
 ## 9. Known limitations (state these to judges)
 
-- Python only; no JS/TS analysis yet.
-- Intra-procedural data-flow only; no inter-procedural or alias analysis.
+- Python, JavaScript and TypeScript only. JSX/TSX parse, but tool discovery is
+  pattern-based.
+- Intra-procedural data-flow only: one function body, no inter-procedural
+  propagation, no alias analysis, no class fields or re-exports. Module-level
+  bindings are visible to handlers (lexical scope), but values passed between
+  functions are not followed.
+- Per-tool capabilities are attributed only from the tool's own handler span.
+  Helper functions are reported at repository level, never attributed to a
+  tool.
 - Static analysis cannot see runtime behaviour, dynamic imports or obfuscation.
-- No runtime detonation.
-- No authentication; local/dev use only.
+- Low-level `Server.setRequestHandler` tool registrations and non-literal tool
+  names are not discovered.
+- GitHub ZIP archives only: LFS content appears as pointer files; submodules
+  are not fetched (by design).
+- The scan timeout is checked between files; a single pathological file is
+  bounded by the per-file size cap, not by a hard kill.
+- Unauthenticated GitHub API limits scans to 60 requests/hour per IP
+  (set `CAPCHECK_GITHUB_TOKEN` for more).
+- No runtime detonation, no authentication, no multi-user isolation.

@@ -146,7 +146,9 @@ def is_dynamic_exec(node: ast.AST) -> bool:
     if not isinstance(node, ast.Call):
         return False
     chain = _attr_chain(node.func)
-    return chain in (["exec"], ["eval"], ["compile"], ["__import__"])
+    # ``__import__`` is a dynamic import, not dynamic execution; flagging it
+    # as code execution overstated severity on ordinary test helpers.
+    return chain in (["exec"], ["eval"], ["compile"])
 
 
 # --------------------------------------------------------------------------

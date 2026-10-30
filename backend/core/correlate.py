@@ -16,7 +16,22 @@ from backend.models import (
     RiskAssessment,
     RiskItem,
 )
-from backend.rules import python_rules
+from backend.rules import javascript_rules, python_rules
+
+_RULE_TABLES = (python_rules.RULES, javascript_rules.RULES)
+
+
+def _rule(rule_id: str):
+    """Look a rule up across language tables.
+
+    The catalogues are separate so each language owns its own severity
+    decisions, but correlation stays language-agnostic.
+    """
+    for table in _RULE_TABLES:
+        rule = table.get(rule_id)
+        if rule is not None:
+            return rule
+    raise KeyError(f"unknown rule id: {rule_id}")
 
 
 def _band(score: int) -> str:
@@ -37,7 +52,7 @@ def _capability_findings(raw: list[dict]) -> list[Finding]:
 
     findings: list[Finding] = []
     for index, ((rule_id, path), items) in enumerate(sorted(grouped.items()), start=1):
-        rule = python_rules.get(rule_id)
+        rule = _rule(rule_id)
         evidence_ids = sorted({entry["evidence_id"] for entry in items})
         lines = sorted({entry["line"] for entry in items})
         findings.append(
@@ -65,7 +80,7 @@ def _capability_findings(raw: list[dict]) -> list[Finding]:
 def _flow_findings(raw: list[dict]) -> list[Finding]:
     findings: list[Finding] = []
     for index, item in enumerate(raw, start=1):
-        rule = python_rules.get(item["rule_id"])
+        rule = _rule(item["rule_id"])
         findings.append(
             Finding(
                 id=f"f_flow_{index:03d}",
