@@ -1,0 +1,195 @@
+:root {
+  color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.45;
+}
+
+body {
+  margin: 0;
+  background: #10131a;
+  color: #e7e9ee;
+}
+
+.shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9aa4b8;
+}
+
+.tagline,
+.muted {
+  color: #8b95a8;
+  font-size: 13px;
+  margin: 0;
+}
+
+.panel {
+  background: #171b24;
+  border: 1px solid #242a36;
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+select,
+button {
+  font: inherit;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #2f3746;
+  background: #1f2530;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: #3b6cf6;
+  border-color: #3b6cf6;
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.stats dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #8b95a8;
+}
+
+.stats dd {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.risk {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #242a36;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 800px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.finding {
+  width: 100%;
+  text-align: left;
+  background: #1c2230;
+  border: 1px solid #2a3344;
+  display: grid;
+  gap: 2px;
+}
+
+.finding.active {
+  border-color: #3b6cf6;
+}
+
+.sev {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sev-critical {
+  color: #ff6b6b;
+}
+.sev-high {
+  color: #ffa94d;
+}
+.sev-medium {
+  color: #ffd43b;
+}
+.sev-low {
+  color: #74c0fc;
+}
+
+.rule,
+.confidence {
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 11px;
+  color: #8b95a8;
+}
+
+.title {
+  font-size: 13px;
+}
+
+.evidence {
+  margin-top: 12px;
+  border: 1px solid #2a3344;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.evidence header {
+  padding: 6px 10px;
+  background: #1c2230;
+  font-size: 12px;
+}
+
+.evidence pre {
+  margin: 0;
+  padding: 10px;
+  overflow-x: auto;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 12px;
+  background: #11151d;
+}
+
+code {
+  font-family: ui-monospace, "Cascadia Code", monospace;
+}
+
+.error {
+  color: #ff8787;
+  font-size: 13px;
+  margin: 10px 0 0;
+}
