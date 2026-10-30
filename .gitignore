@@ -16,6 +16,9 @@ data/
 # Environment
 .env
 
+# Unrelated scratch file that lives in this folder, not part of CapCheck
+/main.py
+
 # Editor / OS
 .vscode/
 .idea/

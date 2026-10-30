@@ -81,6 +81,6 @@ def test_evidence_rejects_paths_that_could_leak_the_filesystem():
     assert build("server.js").path == "server.js"
     assert build("src/tools/server.ts").path == "src/tools/server.ts"
 
-    for bad in ["/etc/passwd", "C:\\Users\\ap877\\server.py", "../../server.js", "src/../../x.js", ""]:
+    for bad in ["/etc/passwd", "C:\\Users\\example\\server.py", "../../server.js", "src/../../x.js", ""]:
         with pytest.raises(ValueError):
             build(bad)
