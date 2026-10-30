@@ -163,7 +163,7 @@ def _analyze(scan: Scan, source: ingest.Source) -> None:
 
     findings = correlate.correlate(capability_raw, flow_raw)
     scan.findings = findings
-    scan.risk = correlate.assess_risk(findings)
+    scan.risk = correlate.assess_risk(findings, scan.evidence)
 
     # Claims from the LLM layer are recorded but can never become findings.
     provider = _provider()

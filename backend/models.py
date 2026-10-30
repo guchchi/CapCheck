@@ -43,12 +43,14 @@ SEVERITY_ORDER: dict[str, int] = {
 }
 
 SEVERITY_WEIGHT: dict[str, int] = {
-    "critical": 55,
-    "high": 25,
-    "medium": 10,
-    "low": 3,
+    "critical": 80,
+    "high": 50,
+    "medium": 20,
+    "low": 5,
     "info": 0,
 }
+
+SEVERITY_BASE = SEVERITY_WEIGHT
 
 
 @dataclass
@@ -137,7 +139,7 @@ class RiskItem:
     severity: str
     confidence: float
     weight: int
-    points: int
+    points: float
 
 
 @dataclass
