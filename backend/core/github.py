@@ -273,6 +273,13 @@ class ExtractResult:
     skipped_oversized: int
 
 
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
 def _entry_parts(name: str) -> list[str]:
     """Validate one archive entry name and split it into safe segments."""
     if "\x00" in name:
@@ -285,6 +292,16 @@ def _entry_parts(name: str) -> list[str]:
     parts = [part for part in name.split("/") if part not in {"", "."}]
     if any(part == ".." for part in parts):
         raise IngestError("ARCHIVE_TRAVERSAL", "Archive entry attempts path traversal.")
+
+    # Windows treats ``CON.js`` and ``NUL`` as device names. Writing one can
+    # hang or target a device rather than a file inside the scan directory.
+    for part in parts:
+        stem = part.split(".", 1)[0].strip().upper()
+        if stem in _WINDOWS_RESERVED_NAMES:
+            raise IngestError(
+                "ARCHIVE_UNSAFE_PATH",
+                f"Archive entry uses a reserved device name: '{part}'.",
+            )
     return parts
 
 

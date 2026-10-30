@@ -90,7 +90,12 @@ def is_file_read(node: ast.AST) -> bool:
         chain = _attr_chain(node.func)
         if chain and chain[-1] == "open":
             return True
-        if chain and chain[-1] in {"read_text", "read_bytes", "readlines", "read"}:
+        # A bare ``.read()`` is not evidence of a file read: it is also the
+        # method on HTTP responses, sockets and in-memory buffers. Keeping it
+        # produced a false PY_FILE_READ on ordinary ``urlopen(...).read()``
+        # code. ``open()`` itself, ``read_text``/``read_bytes`` and
+        # ``readlines`` remain explicit file signals.
+        if chain and chain[-1] in {"read_text", "read_bytes", "readlines"}:
             return True
     return False
 

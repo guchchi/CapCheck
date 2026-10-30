@@ -16,6 +16,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.config import FIXTURES_ROOT, Settings
@@ -105,6 +106,7 @@ def open_repository(url: str, settings: Settings) -> Source:
 
     fetcher = github.get_fetcher()
     resolved = fetcher.resolve(ref, settings)
+    resolved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     temporary = Path(tempfile.mkdtemp(prefix="capcheck-scan-"))
     archive = temporary / "source.zip"
@@ -137,6 +139,8 @@ def open_repository(url: str, settings: Settings) -> Source:
                 "repo": ref.repo,
                 "default_branch": resolved.default_branch,
                 "commit_sha": resolved.commit_sha,
+                "resolved_at": resolved_at,
+                "archive_url": resolved.archive_url,
                 "archive_bytes": archive_bytes,
                 "archive_entries": extracted.files,
                 "archive_bytes_written": extracted.bytes_written,

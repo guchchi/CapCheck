@@ -33,35 +33,46 @@ _SOURCE_LABEL = {
 
 @dataclass
 class Taint:
-    sources: set[str] = field(default_factory=set)
-    line: int | None = None
+    # source kind -> first line where that kind of sensitive data was read.
+    # Tracking one line per source keeps two sources at one sink honest: each
+    # finding cites the line it actually came from.
+    lines: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def sources(self) -> set[str]:
+        return set(self.lines)
 
     def merged_with(self, other: "Taint") -> "Taint":
-        return Taint(self.sources | other.sources, self.line or other.line)
+        lines = dict(self.lines)
+        for kind, line in other.lines.items():
+            lines.setdefault(kind, line)
+        return Taint(lines)
 
 
 def expression_taint(node: ast.AST, env: dict[str, Taint]) -> Taint:
     """Return the taint carried by an expression under the current env."""
     if isinstance(node, ast.Name):
         known = env.get(node.id)
-        return Taint(set(known.sources), known.line) if known else Taint()
+        return Taint(dict(known.lines)) if known else Taint()
     if isinstance(node, ast.Attribute):
         return expression_taint(node.value, env)
     if isinstance(node, ast.Subscript):
         if is_env_access(node):
-            return Taint({SOURCE_ENV}, node.lineno)
+            return Taint({SOURCE_ENV: node.lineno})
         combined = expression_taint(node.value, env).merged_with(expression_taint(node.slice, env))
         return combined
     if isinstance(node, ast.Call):
         result = Taint()
+        # The callee matters: ``open(path).read()`` carries file taint through
+        # the receiver, even though ``read`` itself is no longer a file
+        # signal. Method calls on a tainted receiver stay tainted.
+        result = result.merged_with(expression_taint(node.func, env))
         for child in list(node.args) + [kw.value for kw in node.keywords]:
             result = result.merged_with(expression_taint(child, env))
         if is_env_access(node):
-            result.sources.add(SOURCE_ENV)
-            result.line = result.line or node.lineno
+            result.lines.setdefault(SOURCE_ENV, node.lineno)
         elif is_file_read(node):
-            result.sources.add(SOURCE_FILE)
-            result.line = result.line or node.lineno
+            result.lines.setdefault(SOURCE_FILE, node.lineno)
         return result
     if isinstance(node, ast.Dict):
         result = Taint()
@@ -115,15 +126,22 @@ def _assigned_names(target: ast.AST) -> list[str]:
     return names
 
 
-def _rule_for_flow(sources: set[str], sink_kind: str) -> str | None:
+def _rules_for_flow(sources: set[str], sink_kind: str) -> list[tuple[str, str]]:
+    """Return (rule_id, source_kind) for every provable flow at one sink.
+
+    Two sources reaching the same sink produce two findings, each citing its
+    own source line. This mirrors the JavaScript analyser so the two languages
+    report the same evidence shape.
+    """
+    rules: list[tuple[str, str]] = []
     if sink_kind == "network":
         if SOURCE_ENV in sources:
-            return "DF_ENV_TO_NETWORK"
+            rules.append(("DF_ENV_TO_NETWORK", SOURCE_ENV))
         if SOURCE_FILE in sources:
-            return "DF_FILE_TO_NETWORK"
+            rules.append(("DF_FILE_TO_NETWORK", SOURCE_FILE))
     if sink_kind == "subprocess" and SOURCE_ENV in sources:
-        return "DF_ENV_TO_SUBPROCESS"
-    return None
+        rules.append(("DF_ENV_TO_SUBPROCESS", SOURCE_ENV))
+    return rules
 
 
 def _check_sinks(
@@ -146,35 +164,37 @@ def _check_sinks(
         seen.add(id(node))
 
         taint = expression_taint(node, env)
-        rule_id = _rule_for_flow(taint.sources, sink_kind)
-        if rule_id is None:
+        rules = _rules_for_flow(taint.sources, sink_kind)
+        if not rules:
             continue
 
-        sink_evidence = ctx.add_evidence(node.lineno, rule_id, kind="flow_path")
-        evidence_ids = [sink_evidence]
-        detail = (
-            f"Line {node.lineno}: {ctx.lines[node.lineno - 1].strip()[:160]}"
-            if 0 < node.lineno <= len(ctx.lines)
-            else f"Line {node.lineno}"
-        )
-        if taint.line:
-            source_evidence = ctx.add_evidence(taint.line, rule_id, kind="flow_path")
-            evidence_ids.append(source_evidence)
+        for rule_id, source_kind in rules:
+            sink_evidence = ctx.add_evidence(node.lineno, rule_id, kind="flow_path")
+            evidence_ids = [sink_evidence]
             detail = (
-                f"{_SOURCE_LABEL.get(sorted(taint.sources)[0], 'sensitive data')} "
-                f"read at line {taint.line} reaches the sink at line {node.lineno}."
+                f"Line {node.lineno}: {ctx.lines[node.lineno - 1].strip()[:160]}"
+                if 0 < node.lineno <= len(ctx.lines)
+                else f"Line {node.lineno}"
             )
-        results.append(
-            {
-                "rule_id": rule_id,
-                "path": ctx.path,
-                "line": node.lineno,
-                "source_line": taint.line,
-                "sources": sorted(taint.sources),
-                "evidence_ids": evidence_ids,
-                "detail": detail,
-            }
-        )
+            source_line = taint.lines.get(source_kind)
+            if source_line:
+                source_evidence = ctx.add_evidence(source_line, rule_id, kind="flow_path")
+                evidence_ids.append(source_evidence)
+                detail = (
+                    f"{_SOURCE_LABEL.get(source_kind, 'sensitive data').capitalize()} "
+                    f"read at line {source_line} reaches the sink at line {node.lineno}."
+                )
+            results.append(
+                {
+                    "rule_id": rule_id,
+                    "path": ctx.path,
+                    "line": node.lineno,
+                    "source_line": source_line,
+                    "sources": [source_kind],
+                    "evidence_ids": evidence_ids,
+                    "detail": detail,
+                }
+            )
 
 
 def _statement_lists(statement: ast.stmt) -> list[list[ast.stmt]]:
@@ -205,16 +225,16 @@ def _visit_statements(
             taint = expression_taint(statement.value, env)
             for target in statement.targets:
                 for name in _assigned_names(target):
-                    if taint.sources:
-                        env[name] = Taint(set(taint.sources), taint.line)
+                    if taint.lines:
+                        env[name] = Taint(dict(taint.lines))
                     else:
                         env.pop(name, None)
         elif isinstance(statement, ast.AnnAssign):
             if statement.value is not None:
                 taint = expression_taint(statement.value, env)
                 for name in _assigned_names(statement.target):
-                    if taint.sources:
-                        env[name] = Taint(set(taint.sources), taint.line)
+                    if taint.lines:
+                        env[name] = Taint(dict(taint.lines))
                     else:
                         env.pop(name, None)
         elif isinstance(statement, ast.AugAssign):

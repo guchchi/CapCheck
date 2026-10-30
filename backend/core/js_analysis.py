@@ -102,6 +102,7 @@ class ModuleResolver:
         self.parsed = parsed
         self.namespaces: dict[str, str] = {}
         self.members: dict[str, str] = {}
+        self.shadowed: set[str] = set()
         self._build()
 
     def text(self, node: Node | None) -> str:
@@ -123,11 +124,17 @@ class ModuleResolver:
         return None
 
     def _build(self) -> None:
-        for node in _walk_all(self.parsed.tree.root_node):
+        nodes = list(_walk_all(self.parsed.tree.root_node))
+
+        # Imports first: a later ``const client = axios.create()`` needs the
+        # axios import to be resolvable regardless of textual order.
+        for node in nodes:
             if node.type == "import_statement":
                 self._read_import(node)
-            elif node.type == "variable_declarator":
-                self._read_require_binding(node)
+
+        for node in nodes:
+            if node.type == "variable_declarator":
+                self._read_binding(node)
 
     def _read_import(self, node: Node) -> None:
         module_node = node.child_by_field_name("source")
@@ -163,19 +170,31 @@ class ModuleResolver:
                     local = self.text(idents[-1])
                     self.members[local] = f"{module}.{original}"
 
-    def _read_require_binding(self, node: Node) -> None:
-        value = node.child_by_field_name("value")
-        module = self._require_module(value)
-        if module is None:
-            return
+    def _read_binding(self, node: Node) -> None:
+        """Record require imports and axios instances."""
         name = node.child_by_field_name("name")
         if name is None:
             return
-        if name.type == "identifier":
-            self.namespaces[self.text(name)] = module
-        elif name.type == "object_pattern":
-            for local, original in _pattern_pairs(self.parsed, name):
-                self.members[local] = f"{module}.{original}"
+        value = node.child_by_field_name("value")
+
+        module = self._require_module(value)
+        if module is not None:
+            if name.type == "identifier":
+                self.namespaces[self.text(name)] = module
+            elif name.type == "object_pattern":
+                for local, original in _pattern_pairs(self.parsed, name):
+                    self.members[local] = f"{module}.{original}"
+            return
+
+        if name.type != "identifier":
+            return
+
+        # ``const client = axios.create(...)`` returns an axios instance;
+        # ``client.post(...)`` is the same sink as ``axios.post(...)``.
+        if value is not None and value.type == "call_expression":
+            callee = value.child_by_field_name("function")
+            if self.canonical(callee) == "axios.create":
+                self.namespaces[self.text(name)] = "axios"
 
     def module_of(self, node: Node | None) -> str | None:
         if node is None:
@@ -251,6 +270,171 @@ def _pattern_pairs(parsed: ParsedSource, pattern: Node) -> Iterator[tuple[str, s
 
 
 # --------------------------------------------------------------------------
+# Scope resolution for identifier shadowing
+# --------------------------------------------------------------------------
+
+BLOCK_TYPES = frozenset(
+    {
+        "statement_block",
+        "for_statement",
+        "for_in_statement",
+        "for_of_statement",
+        "while_statement",
+        "do_statement",
+        "switch_block",
+        "catch_clause",
+    }
+)
+
+
+def _extract_bound_identifiers(parsed: ParsedSource, pattern: Node | None) -> set[str]:
+    """Extract bound variable names from an identifier, pattern, or parameter."""
+    if pattern is None:
+        return set()
+    names: set[str] = set()
+    stack = [pattern]
+    while stack:
+        curr = stack.pop()
+        if curr.type == "type_annotation":
+            continue
+        if curr.type in {"identifier", "shorthand_property_identifier_pattern"}:
+            parent = curr.parent
+            if parent and parent.type == "pair_pattern" and parent.child_by_field_name("key") == curr:
+                continue
+            names.add(parsed.text(curr))
+        stack.extend(reversed(curr.named_children))
+    return names
+
+
+def _function_parameter_names(parsed: ParsedSource, func_node: Node) -> set[str]:
+    """Return all parameter names bound by a function."""
+    names: set[str] = set()
+    if func_node.type == "arrow_function":
+        param = func_node.child_by_field_name("parameter")
+        if param is not None and param.type == "identifier":
+            names.add(parsed.text(param))
+    params = func_node.child_by_field_name("parameters")
+    if params is None:
+        for child in func_node.named_children:
+            if child.type == "formal_parameters":
+                params = child
+                break
+    if params is not None:
+        names.update(_extract_bound_identifiers(parsed, params))
+    return names
+
+
+def _function_var_declarations(parsed: ParsedSource, func_node: Node) -> set[str]:
+    """Return names declared via `var` anywhere inside this function (hoisted to function scope)."""
+    names: set[str] = set()
+    body = func_node.child_by_field_name("body")
+    if body is None:
+        return names
+    for node in _walk_no_functions(body):
+        if node.type == "variable_declaration":
+            for child in node.named_children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    if name_node is not None:
+                        names.update(_extract_bound_identifiers(parsed, name_node))
+        elif node.type in {"for_in_statement", "for_of_statement"}:
+            if any(c.type == "var" for c in node.children):
+                left = node.child_by_field_name("left")
+                if left is not None:
+                    names.update(_extract_bound_identifiers(parsed, left))
+    return names
+
+
+def _block_lexical_declarations(parsed: ParsedSource, block_node: Node) -> set[str]:
+    """Return names declared directly in this block via const/let/class/function."""
+    names: set[str] = set()
+    if block_node.type in {"for_in_statement", "for_of_statement"}:
+        if any(c.type in {"const", "let"} for c in block_node.children):
+            left = block_node.child_by_field_name("left")
+            if left is not None:
+                names.update(_extract_bound_identifiers(parsed, left))
+    for stmt in block_node.named_children:
+        if stmt.type == "lexical_declaration":
+            for child in stmt.named_children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    if name_node is not None:
+                        names.update(_extract_bound_identifiers(parsed, name_node))
+        elif stmt.type in {"function_declaration", "generator_function_declaration", "class_declaration"}:
+            name_node = stmt.child_by_field_name("name")
+            if name_node is not None and name_node.type == "identifier":
+                names.add(parsed.text(name_node))
+    return names
+
+
+def _module_declarations(parsed: ParsedSource, root_node: Node) -> set[str]:
+    """Return names declared at module level (top-level scope)."""
+    names: set[str] = set()
+    for stmt in root_node.named_children:
+        target = stmt
+        if stmt.type == "export_statement":
+            for c in stmt.named_children:
+                if c.type in {
+                    "lexical_declaration",
+                    "variable_declaration",
+                    "function_declaration",
+                    "generator_function_declaration",
+                    "class_declaration",
+                }:
+                    target = c
+                    break
+        if target.type in {"lexical_declaration", "variable_declaration"}:
+            for child in target.named_children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    if name_node is not None:
+                        names.update(_extract_bound_identifiers(parsed, name_node))
+        elif target.type in {"function_declaration", "generator_function_declaration", "class_declaration"}:
+            name_node = target.child_by_field_name("name")
+            if name_node is not None and name_node.type == "identifier":
+                names.add(parsed.text(name_node))
+        elif target.type == "import_statement":
+            for c in _walk_no_functions(target):
+                if c.type == "import_specifier":
+                    idents = [i for i in c.named_children if i.type == "identifier"]
+                    if idents:
+                        names.add(parsed.text(idents[-1]))
+                elif c.type in {"import_clause", "namespace_import"}:
+                    for ident in c.named_children:
+                        if ident.type == "identifier":
+                            names.add(parsed.text(ident))
+    return names
+
+
+def is_identifier_shadowed(parsed: ParsedSource, call_node: Node, name: str) -> bool:
+    """Check whether `name` is shadowed by an enclosing lexical scope."""
+    curr = call_node.parent
+    while curr is not None:
+        if curr.type in BLOCK_TYPES:
+            if name in _block_lexical_declarations(parsed, curr):
+                return True
+            if curr.type == "catch_clause":
+                param = curr.child_by_field_name("parameter")
+                if param is not None and name in _extract_bound_identifiers(parsed, param):
+                    return True
+        if curr.type in FUNCTION_TYPES:
+            if name in _function_parameter_names(parsed, curr):
+                return True
+            if name in _function_var_declarations(parsed, curr):
+                return True
+            func_name = curr.child_by_field_name("name")
+            if func_name is not None and parsed.text(func_name) == name:
+                return True
+        curr = curr.parent
+
+    # Module-level scope (top-level declarations)
+    if name in _module_declarations(parsed, parsed.tree.root_node):
+        return True
+
+    return False
+
+
+# --------------------------------------------------------------------------
 # Classification
 # --------------------------------------------------------------------------
 
@@ -294,7 +478,7 @@ def is_network_sink(resolver: ModuleResolver, node: Node) -> bool:
     if canonical is None:
         return False
     if canonical == "fetch":
-        return True
+        return not is_identifier_shadowed(resolver.parsed, node, "fetch")
     if canonical == "axios":
         return True
     if canonical.startswith("axios.") and canonical.split(".", 1)[1] in HTTP_METHODS:
