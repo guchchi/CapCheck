@@ -23,14 +23,39 @@ from backend.core import (
 )
 from backend.core.dataflow import scan_flows
 from backend.core.ingest import IngestError
-from backend.llm.null import NullProvider
-from backend.models import Scan
-
-_PROVIDERS = {"null": NullProvider()}
+from backend.llm import GemmaProvider, LLMProvider, NullProvider
+from backend.models import Scan, ToolDef
 
 
-def _provider():
-    return _PROVIDERS.get(settings.llm_provider, NullProvider())
+def _provider() -> LLMProvider:
+    provider_name = (settings.llm_provider or "").lower().strip()
+    if provider_name in {"gemma", "gemma4", "google"}:
+        if not settings.gemini_api_key:
+            return NullProvider()
+        return GemmaProvider(
+            api_key=settings.gemini_api_key,
+            model=settings.gemma_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+        )
+    return NullProvider()
+
+
+def _extract_tool_code_context(source: ingest.Source | None, tool: ToolDef) -> str:
+    if source is None or not getattr(source, "root", None):
+        return ""
+    try:
+        file_path = source.root / tool.source_file
+        if not file_path.is_file():
+            return ""
+        lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        start = max(1, tool.handler_line or tool.line)
+        end = tool.handler_end_line or (start + 40)
+        end = min(len(lines), end, start + 50)
+        snippet_lines = lines[start - 1 : end]
+        return "\n".join(snippet_lines)
+    except Exception:
+        return ""
 
 
 def execute(scan_id: str) -> None:
@@ -168,6 +193,11 @@ def _analyze(scan: Scan, source: ingest.Source) -> None:
     # Claims from the LLM layer are recorded but can never become findings.
     provider = _provider()
     for tool in scan.tools:
-        capabilities = sorted({cap for finding in findings for cap in finding.capabilities})
-        for claim in provider.analyze_tool(tool, capabilities):
+        capabilities = (
+            list(tool.observed_capabilities)
+            if tool.observed_capabilities
+            else sorted({cap for finding in findings for cap in finding.capabilities})
+        )
+        code_context = _extract_tool_code_context(source, tool)
+        for claim in provider.analyze_tool(tool, capabilities, code_context=code_context):
             scan.suppressed_claims.append({"provider": provider.name, **claim})

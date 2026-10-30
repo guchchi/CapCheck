@@ -101,6 +101,7 @@ def get_scan(scan_id: str) -> dict:
         "languages": scan.languages,
         "metadata": scan.metadata,
         "tool_count": len(scan.tools),
+        "claim_count": len(scan.suppressed_claims),
         "finding_count": len(scan.findings),
         "critical_count": sum(1 for f in scan.findings if f.severity == "critical"),
         "risk": scan.risk.to_dict() if scan.risk else None,

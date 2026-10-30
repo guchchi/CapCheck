@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import {
   createScan,
+  getClaims,
   getEvidence,
   getFindings,
   getHealth,
   getScan,
   getTools,
 } from "./api";
-import type { Evidence, Finding, ScanStatus, ToolDef } from "./types";
+import type { AIClaim, Evidence, Finding, ScanStatus, ToolDef } from "./types";
 
 const POLL_INTERVAL_MS = 400;
 const POLL_LIMIT = 300;
@@ -47,6 +48,7 @@ export default function App() {
   const [scan, setScan] = useState<ScanStatus | null>(null);
   const [tools, setTools] = useState<ToolDef[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [claims, setClaims] = useState<AIClaim[]>([]);
   const [selected, setSelected] = useState<Finding | null>(null);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [busy, setBusy] = useState(false);
@@ -100,6 +102,7 @@ export default function App() {
     setScan(null);
     setTools([]);
     setFindings([]);
+    setClaims([]);
     setSelected(null);
     setEvidence([]);
 
@@ -111,12 +114,14 @@ export default function App() {
       if (status.status === "failed") {
         throw new Error(status.error ?? "Scan failed.");
       }
-      const [toolList, result] = await Promise.all([
+      const [toolList, result, claimList] = await Promise.all([
         getTools(created.scan_id),
         getFindings(created.scan_id),
+        getClaims(created.scan_id).catch(() => []),
       ]);
       setTools(toolList);
       setFindings(result);
+      setClaims(claimList);
       if (result.length > 0) {
         await selectFinding(created.scan_id, result[0]);
       }
@@ -313,6 +318,68 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {scan && scan.status === "complete" && (
+        <section className="panel">
+          <div className="observations-header">
+            <h2>Unverified AI Observations ({claims.length})</h2>
+            <span className="advisory-note">
+              Non-authoritative semantic analysis &bull; Excluded from risk scoring
+            </span>
+          </div>
+          {claims.length === 0 ? (
+            <p className="muted">No semantic observations generated.</p>
+          ) : (
+            <div className="observation-list">
+              {claims.map((claim) => (
+                <article key={claim.id} className="observation-card">
+                  <header className="observation-header">
+                    <div className="observation-title">
+                      <code>{claim.tool_name}</code>
+                      {claim.potential_mismatch ? (
+                        <span className="obs-badge mismatch">Potential Mismatch</span>
+                      ) : (
+                        <span className="obs-badge consistent">No Mismatch Detected</span>
+                      )}
+                    </div>
+                    <div className="observation-meta">
+                      <span>Confidence {Math.round(claim.confidence * 100)}%</span>
+                      {claim.model && <span>Model: {claim.model}</span>}
+                    </div>
+                  </header>
+                  <div className="observation-grid">
+                    <div className="observation-field">
+                      <span className="observation-label">Declared behaviour</span>
+                      <p className="observation-val">{claim.claimed_behavior || "—"}</p>
+                    </div>
+                    <div className="observation-field">
+                      <span className="observation-label">Observed behaviour</span>
+                      <p className="observation-val">{claim.observed_behavior || "—"}</p>
+                    </div>
+                  </div>
+                  {claim.reasoning && (
+                    <div className="observation-field" style={{ marginBottom: "8px" }}>
+                      <span className="observation-label">Reasoning</span>
+                      <p className="observation-val muted">{claim.reasoning}</p>
+                    </div>
+                  )}
+                  {claim.supporting_code_references &&
+                    claim.supporting_code_references.length > 0 && (
+                      <div className="observation-field">
+                        <span className="observation-label">Supporting code references</span>
+                        <div className="observation-refs">
+                          {claim.supporting_code_references.map((ref, idx) => (
+                            <code key={idx}>{ref}</code>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                </article>
+              ))}
             </div>
           )}
         </section>

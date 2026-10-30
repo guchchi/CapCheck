@@ -23,6 +23,11 @@ class Settings:
     dev_mode: bool
     data_dir: Path
     llm_provider: str
+    github_api_base: str
+    gemini_api_key: str | None = None
+    gemma_model: str = "gemma-4-31b-it"
+    llm_timeout_seconds: float = 10.0
+    llm_max_retries: int = 2
 
     # Enumeration caps (apply to fixtures and remote repositories alike).
     max_files: int = 3000
@@ -52,6 +57,10 @@ class Settings:
             github_api_base=os.environ.get(
                 "CAPCHECK_GITHUB_API_BASE", "https://api.github.com"
             ),
+            gemini_api_key=os.environ.get("GEMINI_API_KEY"),
+            gemma_model=os.environ.get("CAPCHECK_GEMMA_MODEL", "gemma-4-31b-it"),
+            llm_timeout_seconds=float(os.environ.get("CAPCHECK_LLM_TIMEOUT", "10.0")),
+            llm_max_retries=int(os.environ.get("CAPCHECK_LLM_RETRIES", "2")),
         )
 
     @property

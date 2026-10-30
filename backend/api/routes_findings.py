@@ -50,3 +50,13 @@ def get_evidence(scan_id: str, evidence_id: str) -> dict:
             status_code=404,
         )
     return evidence.to_dict()
+
+
+@router.get("/scans/{scan_id}/claims")
+def get_claims(scan_id: str) -> dict:
+    scan = _require_scan(scan_id)
+    return {
+        "scan_id": scan.id,
+        "count": len(scan.suppressed_claims),
+        "claims": scan.suppressed_claims,
+    }

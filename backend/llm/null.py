@@ -15,5 +15,10 @@ from backend.models import ToolDef
 class NullProvider:
     name = "null"
 
-    def analyze_tool(self, tool: ToolDef, capabilities: list[str]) -> list[dict[str, Any]]:
+    def analyze_tool(
+        self,
+        tool: ToolDef,
+        capabilities: list[str],
+        code_context: str | None = None,
+    ) -> list[dict[str, Any]]:
         return []

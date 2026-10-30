@@ -6,9 +6,10 @@ CapCheck reads an MCP server's source, determines what its tools **claim** to
 do versus what the code **can actually do**, and reports a risk score in which
 every point is traceable to a real file, line and snippet.
 
-> **Milestone 2 scope:** public GitHub ingestion, Python + JavaScript +
-> TypeScript analysis, deterministic risk scoring, and a UI with real stage
-> progress, tool declarations and evidence. Gemma 4 is not integrated yet.
+> **Milestone 3 scope:** public GitHub ingestion, Python + JavaScript +
+> TypeScript analysis, deterministic risk scoring, and Gemma 4 semantic tool
+> behavior analysis with bounded, secret-sanitized context. Claims are surfaced
+> as unverified observations and never independently create findings or alter risk scores.
 
 ## Why
 
@@ -84,6 +85,7 @@ curl -s http://127.0.0.1:8000/api/scans/<scan_id>/findings
 | GET | `/api/scans/{id}` | Status, stage, commit SHA, languages, counts, risk |
 | GET | `/api/scans/{id}/findings` | Correlated findings |
 | GET | `/api/scans/{id}/tools` | Discovered tool declarations + observed capabilities |
+| GET | `/api/scans/{id}/claims` | Semantic AI claims and tool behavior observations |
 | GET | `/api/scans/{id}/evidence/{ev_id}` | Source evidence |
 
 Errors use a uniform envelope:

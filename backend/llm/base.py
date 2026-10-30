@@ -16,6 +16,11 @@ from backend.models import ToolDef
 class LLMProvider(Protocol):
     name: str
 
-    def analyze_tool(self, tool: ToolDef, capabilities: list[str]) -> list[dict[str, Any]]:
+    def analyze_tool(
+        self,
+        tool: ToolDef,
+        capabilities: list[str],
+        code_context: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Return zero or more claims: {claim, cited_evidence_ids, model}."""
         ...

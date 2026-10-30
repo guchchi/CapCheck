@@ -55,6 +55,19 @@ export interface Risk {
   breakdown: RiskItem[];
 }
 
+export interface AIClaim {
+  id: string;
+  tool_name: string;
+  claimed_behavior: string;
+  observed_behavior: string;
+  potential_mismatch: boolean;
+  confidence: number;
+  supporting_code_references: string[];
+  cited_evidence_ids: string[];
+  model: string;
+  reasoning: string;
+}
+
 export interface ScanStatus {
   scan_id: string;
   source: string;
@@ -68,6 +81,7 @@ export interface ScanStatus {
   languages: string[];
   metadata: Record<string, unknown>;
   tool_count: number;
+  claim_count?: number;
   finding_count: number;
   critical_count: number;
   risk: Risk | null;

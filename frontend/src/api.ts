@@ -1,4 +1,4 @@
-import type { Evidence, Finding, ScanStatus, ToolDef } from "./types";
+import type { AIClaim, Evidence, Finding, ScanStatus, ToolDef } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -52,6 +52,13 @@ export async function getTools(scanId: string): Promise<ToolDef[]> {
     `/api/scans/${scanId}/tools`,
   );
   return body.tools;
+}
+
+export async function getClaims(scanId: string): Promise<AIClaim[]> {
+  const body = await request<{ claims: AIClaim[] }>(
+    `/api/scans/${scanId}/claims`,
+  );
+  return body.claims ?? [];
 }
 
 export function getEvidence(
