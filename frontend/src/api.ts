@@ -1,6 +1,9 @@
 import type { AIClaim, Evidence, Finding, ScanStatus, ToolDef } from "./types";
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
   const response = await fetch(url, init);
   let body: unknown = null;
   try {

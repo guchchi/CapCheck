@@ -6,6 +6,8 @@ Run from the project root:
 
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,12 +26,32 @@ app = FastAPI(
 app.add_exception_handler(ApiError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 
-# Development convenience only: the Vite dev server runs on 5173.
+# CORS middleware configuration: supports local Vite dev server (5173),
+# self origin, and any production frontend origins via CAPCHECK_CORS_ORIGINS.
+_default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+_env_origins = os.environ.get("CAPCHECK_CORS_ORIGINS", "").strip()
+if _env_origins:
+    if _env_origins == "*":
+        _allowed_origins = ["*"]
+    else:
+        _allowed_origins = _default_origins + [
+            o.strip() for o in _env_origins.split(",") if o.strip()
+        ]
+else:
+    # In production without specific origins set, allow all or wildcard
+    _allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET", "POST"],
+    allow_origins=_allowed_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    allow_credentials=True if _allowed_origins != ["*"] else False,
 )
 
 app.include_router(routes_scan.router)
